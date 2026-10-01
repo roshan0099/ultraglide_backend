@@ -1,0 +1,14 @@
+services:
+  api:
+    build: .
+    container_name: ultraglide-api
+    restart: always
+    ports:
+      - "5001:5001"
+    env_file:
+      - .env
+    environment:
+      - PORT=5001
+      - DB_PATH=/app/data/orders.db
+    volumes:
+      - ./data:/app/data
