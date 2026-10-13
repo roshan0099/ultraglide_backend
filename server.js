@@ -113,7 +113,12 @@ export const PRODUCT_CATALOG = {
   "UG-SC-500": {
     id: 5,
     name: "Silencer Coating",
-    prices: { "150ml": 249, "500ml": 549 }
+    prices: { "150ml": 249 }
+  },
+  "UG-SC-150": {
+    id: 5,
+    name: "Silencer Coating",
+    prices: { "150ml": 249 }
   }
 };
 
