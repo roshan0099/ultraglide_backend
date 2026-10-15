@@ -93,32 +93,38 @@ export const PRODUCT_CATALOG = {
   "UG-CL-500": {
     id: 1,
     name: "Chain Lube",
-    prices: { "150ml": 199, "500ml": 449 }
+    prices: { "150ml": 149, "500ml": 349 },
+    mrps: { "150ml": 220, "500ml": 500 }
   },
   "UG-CC-500": {
     id: 2,
     name: "Chain Cleaner",
-    prices: { "150ml": 189, "500ml": 429 }
+    prices: { "150ml": 149, "500ml": 349 },
+    mrps: { "150ml": 220, "500ml": 500 }
   },
   "UG-TB-500": {
     id: 3,
     name: "Throttle Body Cleaner",
-    prices: { "150ml": 219, "500ml": 489 }
+    prices: { "150ml": 179, "500ml": 379 },
+    mrps: { "150ml": 250, "500ml": 550 }
   },
   "UG-RO-500": {
     id: 4,
     name: "Rust Off",
-    prices: { "150ml": 179, "500ml": 399 }
+    prices: { "150ml": 139, "500ml": 299 },
+    mrps: { "150ml": 180, "500ml": 400 }
   },
   "UG-SC-500": {
     id: 5,
     name: "Silencer Coating",
-    prices: { "150ml": 249 }
+    prices: { "150ml": 219 },
+    mrps: { "150ml": 280 }
   },
   "UG-SC-150": {
     id: 5,
     name: "Silencer Coating",
-    prices: { "150ml": 249 }
+    prices: { "150ml": 219 },
+    mrps: { "150ml": 280 }
   }
 };
 
@@ -326,6 +332,180 @@ app.post('/api/create-order', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Internal server error while creating order'
+    });
+  }
+});
+
+// Create Cash on Delivery (COD) Order endpoint with immediate Google Sheet sync
+app.post('/api/create-cod-order', async (req, res) => {
+  try {
+    const { customer } = req.body;
+
+    let rawItems = [];
+    if (Array.isArray(req.body.items) && req.body.items.length > 0) {
+      rawItems = req.body.items;
+    } else if (req.body.productCode || req.body.productId) {
+      rawItems = [{
+        productCode: req.body.productCode,
+        productId: req.body.productId,
+        volume: req.body.volume,
+        quantity: req.body.quantity || 1,
+        price: req.body.price
+      }];
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'No products provided for checkout'
+      });
+    }
+
+    const verifiedItems = [];
+    let totalAmountInInr = 0;
+    let totalQuantity = 0;
+
+    for (const rawItem of rawItems) {
+      const { productCode, productId, volume, quantity = 1 } = rawItem;
+
+      if (!volume) {
+        return res.status(400).json({
+          success: false,
+          error: `Missing volume for product ${productCode || productId || 'item'}`
+        });
+      }
+
+      let productEntry = null;
+      let verifiedCode = productCode;
+
+      if (productCode && PRODUCT_CATALOG[productCode]) {
+        productEntry = PRODUCT_CATALOG[productCode];
+      } else if (productId) {
+        const match = Object.entries(PRODUCT_CATALOG).find(
+          ([, item]) => item.id === Number(productId)
+        );
+        if (match) {
+          verifiedCode = match[0];
+          productEntry = match[1];
+        }
+      }
+
+      if (!productEntry) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid product: ${productCode || productId}`
+        });
+      }
+
+      const verifiedUnitPrice = productEntry.prices[volume];
+      if (typeof verifiedUnitPrice !== 'number' || verifiedUnitPrice <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid volume "${volume}" for ${productEntry.name}. Available: ${Object.keys(productEntry.prices).join(', ')}`
+        });
+      }
+
+      const validQty = Math.max(1, Math.min(50, Math.floor(Number(quantity) || 1)));
+      const itemSubtotal = verifiedUnitPrice * validQty;
+
+      verifiedItems.push({
+        productCode: verifiedCode,
+        productName: productEntry.name,
+        volume,
+        unitPrice: verifiedUnitPrice,
+        quantity: validQty,
+        subtotal: itemSubtotal
+      });
+
+      totalAmountInInr += itemSubtotal;
+      totalQuantity += validQty;
+    }
+
+    if (verifiedItems.length === 0 || totalAmountInInr <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order total must be greater than zero'
+      });
+    }
+
+    const amountInPaise = Math.round(totalAmountInInr * 100);
+    // Add clear (COD) identifier to the items text so it stands out in Google Sheets & DB
+    const summaryText = verifiedItems
+      .map((i) => `${i.productName} (${i.volume}) x ${i.quantity}`)
+      .join(', ') + ' (COD)';
+
+    const orderId = `COD_${Date.now()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+    // Save COD order in database
+    const insertStmt = db.prepare(`
+      INSERT INTO orders (
+        order_id,
+        payment_id,
+        amount,
+        currency,
+        status,
+        product_code,
+        product_name,
+        volume,
+        quantity,
+        items_json,
+        customer_name,
+        customer_email,
+        customer_phone,
+        customer_address,
+        customer_pincode,
+        customer_city,
+        customer_state,
+        is_sandbox
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insertStmt.run(
+      orderId,
+      'CASH ON DELIVERY (COD)',
+      amountInPaise,
+      'INR',
+      'COD (PENDING)',
+      verifiedItems.map((i) => i.productCode).join(','),
+      summaryText,
+      verifiedItems.map((i) => i.volume).join(','),
+      totalQuantity,
+      JSON.stringify(verifiedItems),
+      customer?.name || '',
+      customer?.email || '',
+      customer?.phone || '',
+      customer?.address || '',
+      customer?.pincode || '',
+      customer?.city || '',
+      customer?.state || '',
+      0
+    );
+
+    // Retrieve order details
+    const orderDetails = db.prepare(`
+      SELECT * FROM orders WHERE order_id = ?
+    `).get(orderId);
+
+    // Immediately sync to Google Sheet dashboard with (COD) tags
+    syncOrderToSheet(orderDetails).catch((err) => {
+      console.warn('Non-blocking sheet sync error for COD:', err.message);
+    });
+
+    res.json({
+      success: true,
+      orderId,
+      amount: amountInPaise,
+      currency: 'INR',
+      paymentMethod: 'COD',
+      summary: summaryText,
+      items: verifiedItems,
+      totalItems: totalQuantity,
+      totalAmount: totalAmountInInr,
+      order: orderDetails
+    });
+  } catch (error) {
+    console.error('Error creating COD order:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error while creating COD order'
     });
   }
 });
