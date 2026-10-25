@@ -125,6 +125,30 @@ export const PRODUCT_CATALOG = {
     name: "Silencer Coating",
     prices: { "150ml": 219 },
     mrps: { "150ml": 280 }
+  },
+  "UG-RR-150": {
+    id: 6,
+    name: "Rat Repellent Spray",
+    prices: { "150ml": 199 },
+    mrps: { "150ml": 300 }
+  },
+  "UG-HC-150": {
+    id: 7,
+    name: "Helmet Cleaner (Foam Type)",
+    prices: { "150ml": 199 },
+    mrps: { "150ml": 300 }
+  },
+  "UG-EC-500": {
+    id: 8,
+    name: "Contact Cleaner",
+    prices: { "500ml": 379 },
+    mrps: { "500ml": 550 }
+  },
+  "UG-CS-1000": {
+    id: 9,
+    name: "Car / Bike Shampoo",
+    prices: { "200ml": 95, "500ml": 199, "1L": 349, "1000ml": 349 },
+    mrps: { "200ml": 95, "500ml": 270, "1L": 490, "1000ml": 490 }
   }
 };
 
