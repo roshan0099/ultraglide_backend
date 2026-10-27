@@ -117,14 +117,14 @@ export const PRODUCT_CATALOG = {
   "UG-SC-500": {
     id: 5,
     name: "Silencer Coating",
-    prices: { "150ml": 219 },
-    mrps: { "150ml": 280 }
+    prices: { "150ml": 219, "500ml": 399 },
+    mrps: { "150ml": 280, "500ml": 650 }
   },
   "UG-SC-150": {
     id: 5,
     name: "Silencer Coating",
-    prices: { "150ml": 219 },
-    mrps: { "150ml": 280 }
+    prices: { "150ml": 219, "500ml": 399 },
+    mrps: { "150ml": 280, "500ml": 650 }
   },
   "UG-RR-150": {
     id: 6,
@@ -149,6 +149,12 @@ export const PRODUCT_CATALOG = {
     name: "Car / Bike Shampoo",
     prices: { "200ml": 95, "500ml": 199, "1L": 349, "1000ml": 349 },
     mrps: { "200ml": 95, "500ml": 270, "1L": 490, "1000ml": 490 }
+  },
+  "UG-CB-1": {
+    id: 10,
+    name: "Chain Cleaning Brush",
+    prices: { "1 Unit": 119, "1 Pc": 119, "Standard": 119, "default": 119 },
+    mrps: { "1 Unit": 150, "1 Pc": 150, "Standard": 150, "default": 150 }
   }
 };
 
