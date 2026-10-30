@@ -1,21 +1,19 @@
-FROM node:20-slim
+# Lightweight Lambda Web Function Dockerfile
+# Optimized for AWS Lambda Web Functions — no native SQLite bindings needed
+FROM node:24-slim
 
 WORKDIR /app
 
-# Install build dependencies for better-sqlite3 native bindings
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
-
 COPY package*.json ./
-RUN npm install --omit=dev
 
-COPY . .
+# Only install production JS deps — skip optional native modules (better-sqlite3)
+RUN npm install --omit=dev --ignore-scripts && \
+    rm -rf node_modules/better-sqlite3 node_modules/.cache
 
-# Ensure data directory exists for persistent SQLite database
-RUN mkdir -p /app/data
-
-EXPOSE 5001
+COPY index.js app.js ./
 
 ENV NODE_ENV=production
-ENV DB_PATH=/app/data/orders.db
+ENV IS_LAMBDA=true
 
-CMD ["npm", "start"]
+# Lambda Web Functions expect the app on port from AWS_LAMBDA_HTTP_ENDPOINT
+CMD ["node", "index.js"]

@@ -28,5 +28,6 @@ logs/
 # OS & Editor metadata
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
+# Archives
+*.zip
+lambda-build/

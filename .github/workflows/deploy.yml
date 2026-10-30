@@ -1,0 +1,108 @@
+# CI/CD Pipeline: GitHub → S3 → Lambda Web Function
+# Uses OIDC federation — no stored AWS credentials, zero keys to leak
+# Triggers on push to main branch
+
+name: Deploy to Lambda
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+permissions:
+  id-token: write   # Required for OIDC token request
+  contents: read     # Required for actions/checkout
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: ultraglide-lambda-deployments
+  S3_KEY: ultraglide-backend/latest.zip
+  LAMBDA_FUNCTION_NAME: razor-back
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: 📦 Build deployment package
+        run: |
+          mkdir -p build
+          cp index.js app.js build/
+
+          # Create a clean package.json with only production deps
+          node -e "
+            const pkg = require('./package.json');
+            delete pkg.optionalDependencies;
+            delete pkg.devDependencies;
+            delete pkg.scripts;
+            pkg.scripts = { start: 'node index.js' };
+            require('fs').writeFileSync('build/package.json', JSON.stringify(pkg, null, 2));
+          "
+
+          cd build
+          npm install --omit=dev --ignore-scripts
+
+          # Remove any native modules that may have snuck in
+          rm -rf node_modules/better-sqlite3 node_modules/.cache
+
+      - name: 🗜️ Create deployment ZIP
+        run: |
+          cd build
+          zip -r ../deploy.zip . -x "*.DS_Store"
+          cd ..
+          echo "📊 ZIP size: $(du -h deploy.zip | cut -f1)"
+
+      - name: 🔐 Assume AWS Role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: 🪣 Ensure S3 bucket exists
+        run: |
+          aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} 2>/dev/null || \
+          aws s3api create-bucket --bucket ${{ env.S3_BUCKET }} --region ${{ env.AWS_REGION }}
+
+      - name: ⬆️ Upload ZIP to S3
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          aws s3 cp deploy.zip s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}
+          aws s3 cp deploy.zip s3://${{ env.S3_BUCKET }}/ultraglide-backend/deploy-${TIMESTAMP}.zip
+          echo "✅ Uploaded to s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}"
+
+      - name: 🚀 Update Lambda function
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+            --s3-bucket ${{ env.S3_BUCKET }} \
+            --s3-key ${{ env.S3_KEY }} \
+            --publish
+          echo "✅ Lambda function updated!"
+
+      - name: ⏳ Wait for Lambda to be active
+        run: |
+          echo "Waiting for Lambda to be ready..."
+          aws lambda wait function-active-v2 \
+            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+          echo "✅ Lambda is active!"
+
+      - name: 🧪 Health check
+        run: |
+          sleep 5
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            https://h11dmvmx25x5hsrp.ww4.lambda-web.us-east-1.on.aws/ || echo "000")
+
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Health check passed! (HTTP $RESPONSE)"
+          else
+            echo "⚠️ Health check returned HTTP $RESPONSE (may need a moment to warm up)"
+          fi

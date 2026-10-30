@@ -1,0 +1,35 @@
+service: ultraglide-backend
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  memorySize: 512
+  timeout: 15
+  environment:
+    NODE_ENV: production
+    FRONTEND_URL: ${env:FRONTEND_URL, '*'}
+    RAZORPAY_KEY_ID: ${env:RAZORPAY_KEY_ID, ''}
+    RAZORPAY_KEY_SECRET: ${env:RAZORPAY_KEY_SECRET, ''}
+    GOOGLE_SHEET_WEBHOOK_URL: ${env:GOOGLE_SHEET_WEBHOOK_URL, ''}
+
+functions:
+  api:
+    handler: index.handler
+    url: true # Enables free, direct HTTPS Lambda Function URL (no API Gateway needed)
+    events:
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+      - httpApi:
+          path: /
+          method: ANY
+
+package:
+  patterns:
+    - '!orders.db*'
+    - '!node_modules/better-sqlite3/build/Release/*.node' # Native Mac binaries
+    - '!test*'
+    - '!.git/**'

@@ -2,20 +2,27 @@
   "name": "ultraglide-backend",
   "version": "1.0.0",
   "description": "UltraGlide simple backend service with Razorpay integration",
-  "main": "server.js",
+  "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node index.js",
+    "dev": "node --watch server.js",
+    "build:lambda": "rm -rf lambda-build && mkdir -p lambda-build && cp index.js app.js package.json lambda-build/ && cd lambda-build && npm install --omit=dev --ignore-scripts && rm -rf node_modules/better-sqlite3 node_modules/.cache && zip -r ../ultraglide-lambda.zip . && cd .. && echo '✅ Lambda ZIP ready: ultraglide-lambda.zip'"
   },
-  "keywords": ["ultraglide", "razorpay", "express"],
+  "keywords": [
+    "ultraglide",
+    "razorpay",
+    "express"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "razorpay": "^2.9.6"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^12.4.1"
   }
 }
