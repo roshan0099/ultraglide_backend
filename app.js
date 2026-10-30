@@ -16,7 +16,7 @@ if (!isLambda) {
   try {
     const dotenv = await import('dotenv');
     dotenv.default.config();
-  } catch {}
+  } catch { }
 }
 
 // Razorpay: dynamic import so missing package doesn't crash Lambda
@@ -120,7 +120,7 @@ if (isLambda) {
     db = new Database(dbPath);
     try {
       db.pragma('journal_mode = WAL');
-    } catch {}
+    } catch { }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS orders (
@@ -149,7 +149,7 @@ if (isLambda) {
 
     try {
       db.exec(`ALTER TABLE orders ADD COLUMN items_json TEXT`);
-    } catch (e) {}
+    } catch (e) { }
 
     console.log(`📦 Local SQLite database initialized successfully at ${dbPath}`);
   } catch (err) {
@@ -271,6 +271,7 @@ app.get('/api/health', (req, res) => {
     service: 'ultraglide-backend',
     razorpay_configured: isConfigured,
     time: new Date().toISOString()
+
   });
 });
 
