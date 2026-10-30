@@ -1,124 +1,219 @@
-# CI/CD Pipeline: GitHub → S3 → Lambda Web Function
-# Uses OIDC federation — no stored AWS credentials, zero keys to leak
-# Triggers on push to main branch
 
-name: Deploy to Lambda
+name: Deploy to Lambda Web Function
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch: # Allow manual trigger from GitHub UI
+    branches:
+      - main
+  workflow_dispatch:
 
+# GitHub needs permission to request an OIDC token.
 permissions:
-  id-token: write   # Required for OIDC token request
-  contents: read     # Required for actions/checkout
+  id-token: write
+  contents: read
+
+concurrency:
+  group: lambda-web-production
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-east-1
   S3_BUCKET: ultraglide-lambda-deployments
-  S3_KEY: ultraglide-backend/latest.zip
-  LAMBDA_FUNCTION_NAME: arn:aws:lambda:us-east-1:908764745671:web-function/razor-back
+  S3_KEY: ultraglide-backend/${{ github.sha }}.zip
+  LAMBDA_FUNCTION_NAME: razor-back
+  LAMBDA_EXECUTION_ROLE_ARN: arn:aws:iam::908764745671:role/service-role/razor-back-role-epy1mfjp
+  LAMBDA_ENDPOINT_URL: https://h11dmvmx25x5hsrp.ww4.lambda-web.us-east-1.on.aws/
 
 jobs:
   deploy:
-    name: Build & Deploy
+    name: Build and deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - name: 📥 Checkout code
+      # 1. Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🟢 Setup Node.js
+      # 2. Install Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: 24
 
-      - name: 📦 Build deployment package
+      # 3. Build deployment package
+      - name: Build application
         run: |
-          mkdir -p build
-          cp index.js app.js build/
+          set -e
 
-          # Create a clean package.json with only production deps
-          node -e "
-            const pkg = require('./package.json');
-            delete pkg.optionalDependencies;
-            delete pkg.devDependencies;
-            delete pkg.scripts;
-            pkg.scripts = { start: 'node index.js' };
-            require('fs').writeFileSync('build/package.json', JSON.stringify(pkg, null, 2));
-          "
+          mkdir -p build
+
+          cp index.js app.js build/
+          cp package.json build/
 
           cd build
+
           npm install --omit=dev --ignore-scripts
 
-          # Remove any native modules that may have snuck in
-          rm -rf node_modules/better-sqlite3 node_modules/.cache
-
-      - name: 🗜️ Create deployment ZIP
-        run: |
-          cd build
-          zip -r ../deploy.zip . -x "*.DS_Store"
           cd ..
-          echo "📊 ZIP size: $(du -h deploy.zip | cut -f1)"
 
-      - name: 🔍 Inspect OIDC Token Claims
+          echo "Application build completed"
+
+      # 4. Create ZIP
+      - name: Package application
         run: |
-          RAW_TOKEN=$(curl -sLS -H "User-Agent: actions/bash" \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "=== GitHub OIDC Claims ==="
-          node -e "
-            const token = '$RAW_TOKEN';
-            if (!token || token === 'null') { console.log('❌ No OIDC token received'); process.exit(0); }
-            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            console.log('✅ Issuer (iss):', payload.iss);
-            console.log('✅ Audience (aud):', payload.aud);
-            console.log('✅ Subject (sub):', payload.sub);
-            console.log('✅ Repo:', payload.repository);
-          "
+          set -e
 
-      - name: 🔐 Assume AWS Role via OIDC
+          cd build
+          zip -qr ../deploy.zip . -x "*.DS_Store"
+          cd ..
+
+          echo "Deployment package size:"
+          du -h deploy.zip
+
+      # 5. Configure AWS authentication using GitHub OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🪣 Ensure S3 bucket exists
+      # 6. Verify AWS identity
+      - name: Verify AWS identity
         run: |
-          aws s3api head-bucket --bucket ${{ env.S3_BUCKET }} 2>/dev/null || \
-          aws s3api create-bucket --bucket ${{ env.S3_BUCKET }} --region ${{ env.AWS_REGION }}
+          aws sts get-caller-identity
 
-      - name: ⬆️ Upload ZIP to S3
+      # 7. Upload ZIP to S3
+      - name: Upload deployment package
+        id: upload
         run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          aws s3 cp deploy.zip s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}
-          aws s3 cp deploy.zip s3://${{ env.S3_BUCKET }}/ultraglide-backend/deploy-${TIMESTAMP}.zip
-          echo "✅ Uploaded to s3://${{ env.S3_BUCKET }}/${{ env.S3_KEY }}"
+          set -e
 
-      - name: 🚀 Update Lambda function
-        run: |
-          aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --s3-bucket ${{ env.S3_BUCKET }} \
-            --s3-key ${{ env.S3_KEY }} \
-            --publish
-          echo "✅ Lambda function updated!"
+          aws s3 cp deploy.zip \
+            s3://${S3_BUCKET}/${S3_KEY}
 
-      - name: ⏳ Wait for Lambda to be active
-        run: |
-          echo "Waiting for Lambda to be ready..."
-          aws lambda wait function-active-v2 \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
-          echo "✅ Lambda is active!"
+          VERSION_ID=$(aws s3api head-object \
+            --bucket "$S3_BUCKET" \
+            --key "$S3_KEY" \
+            --query VersionId \
+            --output text)
 
-      - name: 🧪 Health check
-        run: |
-          sleep 5
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
-            https://h11dmvmx25x5hsrp.ww4.lambda-web.us-east-1.on.aws/ || echo "000")
-
-          if [ "$RESPONSE" = "200" ]; then
-            echo "✅ Health check passed! (HTTP $RESPONSE)"
-          else
-            echo "⚠️ Health check returned HTTP $RESPONSE (may need a moment to warm up)"
+          if [ -z "$VERSION_ID" ] || [ "$VERSION_ID" = "None" ]; then
+            echo "S3 object version ID not found. Check bucket versioning."
+            exit 1
           fi
+
+          echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
+
+          echo "Uploaded package version: $VERSION_ID"
+
+      # 8. Install/update AWS CLI if lambda-web commands are missing
+      - name: Ensure Lambda Web CLI is available
+        run: |
+          set -e
+
+          if ! aws lambda-web help >/dev/null 2>&1; then
+            curl -sSL \
+              https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip \
+              -o awscliv2.zip
+
+            unzip -q -o awscliv2.zip
+            sudo ./aws/install --update
+          fi
+
+          aws lambda-web help >/dev/null
+
+      # 9. Create new Lambda Web Function revision
+      - name: Create Lambda Web Function revision
+        id: revision
+        run: |
+          set -e
+
+          jq -n \
+            --arg bucket "$S3_BUCKET" \
+            --arg key "$S3_KEY" \
+            --arg versionId "${{ steps.upload.outputs.version_id }}" \
+            '{
+              codeConfig: {
+                s3Object: {
+                  bucket: $bucket,
+                  key: $key,
+                  versionId: $versionId
+                }
+              },
+              runtimeConfig: {
+                runtime: "nodejs24.x"
+              }
+            }' > build-config.json
+
+          jq -n \
+            --arg role "$LAMBDA_EXECUTION_ROLE_ARN" \
+            '{
+              executionRoleArn: $role
+            }' > service-config.json
+
+          REVISION_ID=$(aws lambda-web create-web-function-revision \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --build-config file://build-config.json \
+            --service-config file://service-config.json \
+            --query revisionId \
+            --output text)
+
+          if [ -z "$REVISION_ID" ] || [ "$REVISION_ID" = "None" ]; then
+            echo "Failed to create Lambda Web Function revision"
+            exit 1
+          fi
+
+          echo "revision_id=$REVISION_ID" >> "$GITHUB_OUTPUT"
+
+          echo "Created revision: $REVISION_ID"
+
+      # 10. Wait until the revision is active
+      - name: Wait for revision activation
+        run: |
+          set -e
+
+          aws lambda-web wait web-function-revision-active \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --revision-id "${{ steps.revision.outputs.revision_id }}"
+
+          echo "Revision is now active"
+
+      # 11. Health check
+      - name: Verify deployment
+        run: |
+          set -e
+
+          echo "Checking endpoint: $LAMBDA_ENDPOINT_URL"
+
+          for attempt in $(seq 1 12); do
+            RESPONSE=$(curl -sS -o /tmp/response.txt \
+              -w "%{http_code}" \
+              --max-time 15 \
+              "$LAMBDA_ENDPOINT_URL" || true)
+
+            echo "Attempt $attempt: HTTP $RESPONSE"
+
+            if [ "$RESPONSE" = "200" ]; then
+              echo "Health check passed!"
+              cat /tmp/response.txt
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Health check failed after 12 attempts"
+          cat /tmp/response.txt || true
+          exit 1
+
+      # 12. Deployment summary
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "## Lambda Web Function Deployment Successful" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Function: $LAMBDA_FUNCTION_NAME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Revision: ${{ steps.revision.outputs.revision_id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Endpoint: $LAMBDA_ENDPOINT_URL" >> "$GITHUB_STEP_SUMMARY"

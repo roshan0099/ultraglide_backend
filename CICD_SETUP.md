@@ -80,7 +80,7 @@ Go to the role → **Permissions** → **Add permissions** → **Create inline p
       "Action": [
         "s3:PutObject",
         "s3:GetObject",
-        "s3:HeadBucket",
+        "s3:ListBucket",
         "s3:CreateBucket"
       ],
       "Resource": [
@@ -89,14 +89,25 @@ Go to the role → **Permissions** → **Add permissions** → **Create inline p
       ]
     },
     {
-      "Sid": "LambdaDeploy",
+      "Sid": "LambdaWebDeploy",
       "Effect": "Allow",
       "Action": [
-        "lambda:UpdateFunctionCode",
-        "lambda:GetFunction",
-        "lambda:GetFunctionConfiguration"
+        "lambda:CreateWebFunctionRevision",
+        "lambda:GetWebFunction",
+        "lambda:GetWebFunctionRevision",
+        "lambda:ListWebFunctionRevisions",
+        "lambda:UpdateWebFunctionEndpoint"
       ],
-      "Resource": "arn:aws:lambda:us-east-1:*:function:razor-back"
+      "Resource": [
+        "arn:aws:lambda:us-east-1:908764745671:web-function/razor-back",
+        "arn:aws:lambda:us-east-1:908764745671:web-function/razor-back/*"
+      ]
+    },
+    {
+      "Sid": "PassExecutionRole",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::908764745671:role/service-role/razor-back-role-epy1mfjp"
     }
   ]
 }
