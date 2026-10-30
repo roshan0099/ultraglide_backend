@@ -17,7 +17,7 @@ env:
   AWS_REGION: us-east-1
   S3_BUCKET: ultraglide-lambda-deployments
   S3_KEY: ultraglide-backend/latest.zip
-  LAMBDA_FUNCTION_NAME: razor-back
+  LAMBDA_FUNCTION_NAME: arn:aws:lambda:us-east-1:908764745671:web-function/razor-back
 
 jobs:
   deploy:
