@@ -61,6 +61,22 @@ jobs:
           cd ..
           echo "📊 ZIP size: $(du -h deploy.zip | cut -f1)"
 
+      - name: 🔍 Inspect OIDC Token Claims
+        run: |
+          RAW_TOKEN=$(curl -sLS -H "User-Agent: actions/bash" \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" | jq -r '.value')
+          echo "=== GitHub OIDC Claims ==="
+          node -e "
+            const token = '$RAW_TOKEN';
+            if (!token || token === 'null') { console.log('❌ No OIDC token received'); process.exit(0); }
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            console.log('✅ Issuer (iss):', payload.iss);
+            console.log('✅ Audience (aud):', payload.aud);
+            console.log('✅ Subject (sub):', payload.sub);
+            console.log('✅ Repo:', payload.repository);
+          "
+
       - name: 🔐 Assume AWS Role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:

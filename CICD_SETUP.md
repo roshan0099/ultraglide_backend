@@ -60,6 +60,8 @@ Go to the role → **Trust relationships** → **Edit trust policy** → paste:
         }
       }
     }
+  ]
+}
 ```
 
 > ⚠️ Replace `YOUR_AWS_ACCOUNT_ID` with your actual 12-digit AWS account ID.
